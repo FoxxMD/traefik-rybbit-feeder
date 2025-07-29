@@ -1,3 +1,3 @@
-module github.com/astappiev/traefik-umami-feeder
+module github.com/FoxxMD/traefik-rybbit-feeder
 
 go 1.21

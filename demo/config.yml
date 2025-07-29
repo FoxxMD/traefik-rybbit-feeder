@@ -1,11 +1,11 @@
 http:
   middlewares:
-    umami:
+    rybbit:
       plugin:
-        umami-feeder:
+        rybbit-feeder:
           debug: true
-          umamiHost: http://umami:3000
-          umamiUsername: "admin"
-          umamiPassword: "umami"
-          umamiTeamId: "8e39c6ad-e44a-4d3e-be98-015db2d62d40"
-          createNewWebsites: true
+          host: https://rybbit.mysite.com
+          apiKey: rb_a0938f333a88239c6250c2c3707a
+          websites:
+            "localhost": "1"
+          batchSize: 1

@@ -1,4 +1,4 @@
-package traefik_umami_feeder
+package traefik_rybbit_feeder
 
 import (
 	"context"
@@ -9,11 +9,11 @@ import (
 
 func TestTraefikUmamiFeeder(t *testing.T) {
 	cfg := CreateConfig()
-	cfg.UmamiHost = "http://localhost:3000"
-	cfg.UmamiUsername = "admin"
-	cfg.UmamiPassword = "umami"
-	cfg.UmamiTeamId = "8e39c6ad-e44a-4d3e-be98-015db2d62d40"
-	cfg.CreateNewWebsites = true
+	cfg.Host = "http://localhost:3000"
+	cfg.APIKey = "8e39c6ad-e44a-4d3e-be98-015db2d62d40"
+	cfg.Websites = map[string]string{
+		"localhost": "4",
+	}
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})

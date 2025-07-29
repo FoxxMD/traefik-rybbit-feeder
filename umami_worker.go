@@ -1,4 +1,4 @@
-package traefik_umami_feeder
+package traefik_rybbit_feeder
 
 import (
 	"context"
@@ -8,48 +8,48 @@ import (
 	"time"
 )
 
-type UmamiEvent struct {
-	Website   string `json:"website"`             // Website ID
-	Hostname  string `json:"hostname"`            // Name of host
-	Language  string `json:"language,omitempty"`  // Language of visitor (ex. "en-US")
-	Referrer  string `json:"referrer,omitempty"`  // Referrer URL
-	Url       string `json:"url"`                 // Page URL
-	Ip        string `json:"ip,omitempty"`        // IP address
-	UserAgent string `json:"userAgent,omitempty"` // User agent
-	Timestamp int64  `json:"timestamp,omitempty"` // UNIX timestamp in seconds
-	//Data     map[string]interface{} `json:"data,omitempty"`   // Additional data for the event
-	//Name     string                 `json:"name,omitempty"`   // Event name (for custom events)
-	//Screen   string                 `json:"screen,omitempty"` // Screen resolution (ex. "1920x1080")
-	//Title    string                 `json:"title,omitempty"`  // Page title
+type RybbitEvent struct {
+	APIKey     string `json:"api_key"`
+	SiteID     string `json:"site_id"`
+	Type       string `json:"type"`
+	Pathname   string `json:"pathname"`
+	Hostname   string `json:"hostname,omitempty"`
+	IP         string `json:"ip_address,omitempty"`
+	UserAgent  string `json:"user_agent,omitempty"`
+	Language   string `json:"language,omitempty"`
+	EventName  string `json:"event_name,omitempty"`
+	Referrer   string `json:"referrer,omitempty"`
+	Properties string `json:"properties,omitempty"`
 }
 
 type SendBody struct {
-	Payload *UmamiEvent `json:"payload"`
-	Type    string      `json:"type"`
+	Payload *RybbitEvent `json:"payload"`
+	Type    string       `json:"type"`
 }
 
 func (h *UmamiFeeder) submitToFeed(req *http.Request, code int) {
 	hostname := parseDomainFromHost(req.Host)
-	websiteId := getWebsiteId(h, hostname)
+	websiteId, ok := h.websites[hostname]
 
-	if websiteId == "" {
-		h.error("tracking skipped, websiteId is unknown: " + hostname)
+	if !ok {
+		h.error("tracking skipped, site-id is unknown: " + hostname)
 		return
 	}
 
-	event := &UmamiEvent{
+	rEvent := &RybbitEvent{
+		APIKey:    h.apiKey,
+		SiteID:    websiteId,
+		Type:      "pageview",
+		Pathname:  req.URL.Path,
 		Hostname:  hostname,
-		Language:  parseAcceptLanguage(req.Header.Get("Accept-Language")),
-		Referrer:  req.Referer(),
-		Url:       req.URL.String(),
-		Ip:        extractRemoteIP(req),
+		IP:        extractRemoteIP(req),
 		UserAgent: req.Header.Get("User-Agent"),
-		Timestamp: time.Now().Unix(),
-		Website:   websiteId,
+		Referrer:  req.Referer(),
+		Language:  parseAcceptLanguage(req.Header.Get("Accept-Language")),
 	}
 
 	select {
-	case h.queue <- event:
+	case h.queue <- rEvent:
 	default:
 		h.error("failed to submit event: queue full")
 	}
@@ -108,16 +108,18 @@ func (h *UmamiFeeder) umamiEventFeeder(ctx context.Context) (err error) {
 
 func (h *UmamiFeeder) reportEventsToUmami(ctx context.Context, events []*SendBody) {
 	h.debug("reporting %d events", len(events))
-	resp, err := sendRequest(ctx, h.umamiHost+"/api/batch", events, nil)
-	if err != nil {
-		h.error("failed to send tracking: " + err.Error())
-		return
+	for _, value := range events {
+		resp, err := sendRequest(ctx, h.host+"/api/track", value.Payload, nil)
+		if err != nil {
+			h.error("failed to send tracking: " + err.Error())
+			return
+		}
+		if h.isDebug {
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			h.debug("%v: %s", resp.Status, string(bodyBytes))
+		}
+		defer func() {
+			_ = resp.Body.Close()
+		}()
 	}
-	if h.isDebug {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		h.debug("%v: %s", resp.Status, string(bodyBytes))
-	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
 }

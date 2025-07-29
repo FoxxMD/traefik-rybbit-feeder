@@ -1,4 +1,4 @@
-package traefik_umami_feeder
+package traefik_rybbit_feeder
 
 import (
 	"bytes"

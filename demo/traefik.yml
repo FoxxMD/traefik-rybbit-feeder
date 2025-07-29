@@ -18,13 +18,11 @@ entryPoints:
     address: ":8080"
   "whoami": # http
     address: ":8081"
-  "umami": # umami dashboard
-    address: ":3000"
 
 api:
   dashboard: true
 
 experimental:
   localPlugins:
-    umami-feeder:
-      moduleName: "github.com/astappiev/traefik-umami-feeder"
+    rybbit-feeder:
+      moduleName: "github.com/foxxmd/traefik-rybbit-feeder"

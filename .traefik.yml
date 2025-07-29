@@ -1,17 +1,13 @@
-displayName: Traefik Umami Feeder
+displayName: Traefik Rybbit Feeder
 
-import: github.com/astappiev/traefik-umami-feeder
+import: github.com/foxxmd/traefik-rybbit-feeder
 type: middleware
 
-summary: A Traefik plugin that feeds Umami Analytics with pageview events
+summary: A Traefik plugin that feeds Rybbit Analytics with pageview events
 iconPath: .assets/icon.png
 
 testData:
-  umamiHost: ""
-  umamiToken: ""
-  umamiUsername: ""
-  umamiPassword: ""
-  umamiTeamId: ""
+  Host: ""
+  ApiKey: ""
   websites:
-    domain: websiteId
-  createNewWebsites: false
+    localhost: siteId

@@ -1,14 +1,13 @@
-# Traefik Umami Feeder Plugin
+# Traefik Rybbit Feeder Plugin
 
-A [Traefik](https://traefik.io/traefik/) middleware plugin that sends visits to your [Umami](https://umami.is) instance.
+A [Traefik](https://traefik.io/traefik/) middleware plugin that sends visits to your [Rybbit](https://www.rybbit.io/) instance.
 
-It was created as an alternative to [traefik-umami-plugin](https://github.com/1cedsoda/traefik-umami-plugin) and
-inspired by the [Plausible Feeder Traefik Plugin](https://github.com/safing/plausiblefeeder).
+**This is a fork of [traefik-umami-feeder](https://github.com/astappiev/traefik-umami-feeder) modified to work with Rybbit.**
 
 ## Introduction
 
-This plugin integrates your Traefik-proxied services with Umami, a simple, fast, privacy-focused analytics solution. It
-captures basic request information (path, user-agent, referrer, screen size, IP) and forwards it to your Umami instance,
+This plugin integrates your Traefik-proxied services with Rybbit, a simple, fast, privacy-focused analytics solution. It
+captures basic request information (path, user-agent, referrer, IP) and forwards it to your Rybbit instance,
 enabling server-side analytics.
 
 Key features:
@@ -26,51 +25,42 @@ Declare the plugin in your Traefik **static configuration**.
 ```yaml
 experimental:
   plugins:
-    umami-feeder:
-      moduleName: github.com/astappiev/traefik-umami-feeder
-      version: v1.3.0 # Replace with the latest version
+    rybbit-feeder:
+      moduleName: github.com/foxxmd/traefik-rybbit-feeder
+      version: v0.13.0 # Replace with the latest version
 ```
 
 ### Step 2. Configure the middleware
 
 Once the plugin is declared, configure it as a middleware in your Traefik **dynamic configuration**.
 
-You can specify which websites to track in two ways:
+You will need to specify at least three pieces of data:
 
-1. **Manual**: Directly provide a `websites` map, associating hostnames with their Umami Website IDs.
-2. **Automatic**: Configure the plugin with your Umami API `umamiToken`, or `umamiUsername` and `umamiPassword`. The
-   plugin will then automatically fetch the list of websites and their IDs from your Umami instance.
-    * Optionally, use `umamiTeamId` to scope website retrieval to a specific team.
-    * Optionally, enable `createNewWebsites` to allow the plugin to create new website entries in Umami if they don't
-      already exist.
+* `host` - Your Rybbit instance base URL. This is URL **without** `/api/track`.
+* `apiKey` - The [**Api Key**](https://www.rybbit.io/docs/api#steps) generated for the website you wish to track.
+* `websites` - A map of `domain` - `site-id` properties to tell the feeder what traffic should go to your Rybbit Site
 
-See the [Middleware Options](#middleware-options) section for detailed configuration options.
+There are additional, optional [Middleware Options](#middleware-options) to configure more behavior below.
 
 ```yaml
 http:
   middlewares:
-    my-umami-middleware:
+    my-rybbit-middleware:
       plugin:
-        umami-feeder:
-          umamiHost: "http://umami:3000" # URL of your Umami instance
+        rybbit-feeder:
+          host: "http://rybbit.mysite.com" # URL of your Rybbit instance
 
-          # Option 1: Define the list of websites
-          # websites:
-          #   "example.com": "d4617504-241c-4797-8eab-5939b367b3ad"
+          apiKey: rb_a0938250c2c2efd061c8250c2c3707a
 
-          # Option 2: Use Umami credentials to fetch websites
-          umamiUsername: "your-umami-username"
-          umamiPassword: "your-umami-password"
-          # umamiToken: "your-umami-api-token" # Alternative to username/password
-
-          # Optional: allow creation of new websites in Umami
-          createNewWebsites: true
+          websites:
+            # domain to capture traffic for and the site-id from Rybbit
+            "example.com": "1"
 ```
 
 ### Step 3. Attach the middleware to your routers
 
 Apply the [configured middleware](https://doc.traefik.io/traefik/routing/routers/#middlewares_1) to the Traefik routers
-you want to track with Umami. This is also done in your **dynamic configuration**.
+you want to track with Rybbit. This is also done in your **dynamic configuration**.
 
 Remember to use the
 correct [provider namespace](https://doc.traefik.io/traefik/providers/overview/#provider-namespace)  (e.g., `@file` if
@@ -79,7 +69,7 @@ your middleware is defined in a file, `@docker` if defined via Docker labels).
 **Example using Docker labels:**
 
 ```yaml
-- "traefik.http.routers.whoami.middlewares=my-umami-middleware@file"
+- "traefik.http.routers.whoami.middlewares=my-rybbit-middleware@file"
 ```
 
 **Example using a dynamic configuration file (e.g., `dynamic_conf.yml`):**
@@ -90,7 +80,7 @@ http:
     whoami:
       rule: "Host(`example.com`)"
       middlewares:
-        - my-umami-middleware@file
+        - my-rybbit-middleware@file
 ```
 
 **Example using static configuration (e.g., `traefik.yml`), by attaching the middleware to an entryPoint to apply it
@@ -101,30 +91,25 @@ entryPoints:
   web:
     http:
       middlewares:
-        - my-umami-middleware@file
+        - my-rybbit-middleware@file
 ```
 
 ## Middleware Options
 
-| key                 | default         | type       | description                                                                                                                                                                                                  |
-|---------------------|-----------------|------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `disabled`          | `false`         | `bool`     | Set to `true` to disable the plugin.                                                                                                                                                                         |
-| `debug`             | `false`         | `bool`     | Set to `true` for verbose logging. Useful for troubleshooting as plugins don't inherit Traefik's global log level.                                                                                           |
-| `queueSize`         | `1000`          | `int`      | Maximum number of tracking events to queue before sending to the Umami server.                                                                                                                               |
-| `umamiHost`         | **required**    | `string`   | URL of your Umami instance, reachable from Traefik (e.g., `http://umami:3000`).                                                                                                                              |
-| `umamiToken`        | -               | `string`   | [Umami API Token](https://umami.is/docs/api/authentication) for authenticating with your Umami instance. Use this *or* `umamiUsername`/`umamiPassword`. Required for automatic website fetching or creation. |
-| `umamiUsername`     | -               | `string`   | Username for Umami authentication. Use this with `umamiPassword` if not using `umamiToken`. Required for automatic website fetching or creation.                                                             |
-| `umamiPassword`     | -               | `string`   | Password for Umami authentication, used in conjunction with `umamiUsername`.                                                                                                                                 |
-| `umamiTeamId`       | -               | `string`   | Optional. If using automatic mode, specifies the Umami Team ID to scope website fetching/creation.                                                                                                           |
-| `websites`          | -               | `map`      | A map of `hostname: umamiWebsiteID`. Used for manual website configuration or to override/extend websites fetched in automatic mode.                                                                         |
-| `createNewWebsites` | `false`         | `bool`     | If `true` and using automatic mode, the plugin will attempt to create a new website entry in Umami if the domain is not found.                                                                               |
-| `trackErrors`       | `false`         | `bool`     | If `true`, tracks errors (status codes >= 400).                                                                                                                                                              |
-| `trackAllResources` | `false`         | `bool`     | If `true`, tracks requests for all resources. By default, only requests likely to be page views (e.g., HTML, or no specific extension) are tracked.                                                          |
-| `trackExtensions`   | `[see sources]` | `string[]` | A list of specific file extensions to track (e.g., `[".html", ".php"]`).                                                                                                                                     |
-| `ignoreUserAgents`  | `[]`            | `string[]` | A list of user-agent substrings. Requests with matching user-agents will be ignored (e.g., `["Googlebot", "Uptime-Kuma"]`). Matched with `strings.Contains`.                                                 |
-| `ignoreURLs`        | `[]`            | `string[]` | A list of regular expressions. Requests with URLs matching any of these patterns will be ignored (e.g., `["/health", "https?://[^/]+/health$"]`). Matched with `regexp.Compile.MatchString`.                 |
-| `ignoreIPs`         | `[]`            | `string[]` | A list of IP addresses or CIDR ranges to ignore (e.g., `["127.0.0.1", "10.0.0.1/16"]`). Matched with `netip.ParsePrefix.Contains`.                                                                           |
-| `headerIp`          | `X-Real-Ip`     | `string`   | The HTTP header to inspect for the client's real IP address, typically used when Traefik is behind another proxy.                                                                                            |
+| key                 | default         | type       | description                                                                                                                                                                                  |
+| ------------------- | :-------------- | :--------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `disabled`          | `false`         | `bool`     | Set to `true` to disable the plugin.                                                                                                                                                         |
+| `debug`             | `false`         | `bool`     | Set to `true` for verbose logging. Useful for troubleshooting as plugins don't inherit Traefik's global log level.                                                                           |
+| `host`              | **required**    | `string`   | URL of your Rybbit instance, reachable from Traefik (e.g., `https://rybbit.mydomain.com`).                                                                                                   |
+| `apiKey`            | **required**    | `string`   | [Rybbit API Key](https://www.rybbit.io/docs/api#steps) for authenticating with your Rybbit instance.                                                                                         |
+| `websites`          | **required**    | `map`      | A map of `hostname: site-id`                                                                                                                                                                 |
+| `trackErrors`       | `false`         | `bool`     | If `true`, tracks errors (status codes >= 400).                                                                                                                                              |
+| `trackAllResources` | `false`         | `bool`     | If `true`, tracks requests for all resources. By default, only requests likely to be page views (e.g., HTML, or no specific extension) are tracked.                                          |
+| `trackExtensions`   | `[see sources]` | `string[]` | A list of specific file extensions to track (e.g., `[".html", ".php"]`).                                                                                                                     |
+| `ignoreUserAgents`  | `[]`            | `string[]` | A list of user-agent substrings. Requests with matching user-agents will be ignored (e.g., `["Googlebot", "Uptime-Kuma"]`). Matched with `strings.Contains`.                                 |
+| `ignoreURLs`        | `[]`            | `string[]` | A list of regular expressions. Requests with URLs matching any of these patterns will be ignored (e.g., `["/health", "https?://[^/]+/health$"]`). Matched with `regexp.Compile.MatchString`. |
+| `ignoreIPs`         | `[]`            | `string[]` | A list of IP addresses or CIDR ranges to ignore (e.g., `["127.0.0.1", "10.0.0.1/16"]`). Matched with `netip.ParsePrefix.Contains`.                                                           |
+| `headerIp`          | `X-Real-Ip`     | `string`   | The HTTP header to inspect for the client's real IP address, typically used when Traefik is behind another proxy.                                                                            |
 
 ## Contributing
 

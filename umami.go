@@ -1,4 +1,4 @@
-package traefik_umami_feeder
+package traefik_rybbit_feeder
 
 import (
 	"context"
@@ -21,29 +21,20 @@ type Config struct {
 	Disabled bool `json:"disabled"`
 	// Debug enables debug logging, be prepared for flooding.
 	Debug bool `json:"debug"`
-	// QueueSize defines the size of queue, i.e. the amount of events that are waiting to be submitted to Umami.
+	// QueueSize defines the size of queue, i.e. the amount of events that are waiting to be submitted to Rybbit.
 	QueueSize int `json:"queueSize"`
-	// BatchSize defines the amount of events that are submitted to Umami in one request.
+	// BatchSize defines the amount of events that are submitted to Rybbit in one request, should always be 1.
 	BatchSize int `json:"batchSize"`
-	// BatchMaxWait defines the maximum time to wait before submitting the batch.
+	// BatchMaxWait defines the maximum time to wait before submitting the batch. Should be 1 second.
 	BatchMaxWait time.Duration `json:"batchMaxWait"`
 
-	// UmamiHost is the URL of the Umami instance.
-	UmamiHost string `json:"umamiHost"`
-	// UmamiToken is an API KEY, which is optional, but either UmamiToken or Websites should be set.
-	UmamiToken string `json:"umamiToken"`
-	// UmamiUsername could be provided as an alternative to UmamiToken, used to retrieve the token.
-	UmamiUsername string `json:"umamiUsername"`
-	// UmamiPassword is required if UmamiUsername is set.
-	UmamiPassword string `json:"umamiPassword"`
-	// UmamiTeamId defines a team, which will be used to retrieve the websites.
-	UmamiTeamId string `json:"umamiTeamId"`
+	// Host is the URL of the Rybbit instance.
+	Host string `json:"host"`
+	// APIKey is the API Key generated in Site Settings for a Rybbit Website
+	APIKey string `json:"apiKey"`
 
-	// Websites is a map of domain to websiteId, which is required if UmamiToken is not set.
-	// If both UmamiToken and Websites are set, Websites will override/extend domains retrieved from the API.
+	// Websites is a map of domain to site-id, which is required
 	Websites map[string]string `json:"websites"`
-	// CreateNewWebsites when set to true, the plugin will create new websites using API, UmamiToken is required.
-	CreateNewWebsites bool `json:"createNewWebsites"`
 
 	// TrackErrors defines whether errors (status codes >= 400) should be tracked.
 	TrackErrors bool `json:"trackErrors"`
@@ -73,14 +64,10 @@ func CreateConfig() *Config {
 		BatchMaxWait: 5 * time.Second,
 		TrackErrors:  false,
 
-		UmamiHost:     "",
-		UmamiToken:    "",
-		UmamiUsername: "",
-		UmamiPassword: "",
-		UmamiTeamId:   "",
+		Host:   "",
+		APIKey: "",
 
-		Websites:          map[string]string{},
-		CreateNewWebsites: false,
+		Websites: map[string]string{},
 
 		TrackAllResources: false,
 		TrackExtensions:   []string{},
@@ -99,14 +86,13 @@ type UmamiFeeder struct {
 	isDebug    bool
 	isDisabled bool
 	logHandler *log.Logger
-	queue      chan *UmamiEvent
+	queue      chan *RybbitEvent
 
 	batchSize    int
 	batchMaxWait time.Duration
 
-	umamiHost         string
-	umamiToken        string
-	umamiTeamId       string
+	host              string
+	apiKey            string
 	websites          map[string]string
 	websitesMutex     sync.RWMutex
 	createNewWebsites bool
@@ -131,16 +117,14 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		isDisabled: config.Disabled,
 		logHandler: log.New(os.Stdout, "", 0),
 
-		queue:        make(chan *UmamiEvent, config.QueueSize),
+		queue:        make(chan *RybbitEvent, config.QueueSize),
 		batchSize:    config.BatchSize,
-		batchMaxWait: config.BatchMaxWait,
+		batchMaxWait: 1 * time.Second,
 
-		umamiHost:         config.UmamiHost,
-		umamiToken:        config.UmamiToken,
-		umamiTeamId:       config.UmamiTeamId,
-		websites:          config.Websites,
-		websitesMutex:     sync.RWMutex{},
-		createNewWebsites: config.CreateNewWebsites,
+		host:          config.Host,
+		apiKey:        config.APIKey,
+		websites:      config.Websites,
+		websitesMutex: sync.RWMutex{},
 
 		trackErrors:       config.TrackErrors,
 		trackAllResources: config.TrackAllResources,
@@ -154,6 +138,8 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 
 	if !h.isDisabled {
 		h.isDisabled = true
+		h.debug("batchSize %d", h.batchSize)
+		h.debug("batchMaxWait %v", h.batchMaxWait)
 		go h.retryConnection(ctx, config)
 	}
 
@@ -178,11 +164,11 @@ func (h *UmamiFeeder) retryConnection(ctx context.Context, config *Config) {
 		select {
 		case <-time.After(currentDelay):
 			retryAttempt++
-			h.debug("Attempting to connect to Umami (attempt #%d)...", retryAttempt)
+			h.debug("Attempting to connect to Rybbit (attempt #%d)...", retryAttempt)
 
 			err := h.connect(ctx, config)
 			if err == nil {
-				h.debug("Successfully connected to Umami. Verifying configuration...")
+				h.debug("Successfully connected to Rybbit. Verifying configuration...")
 
 				err = h.verifyConfig(config)
 				if err == nil {
@@ -197,7 +183,7 @@ func (h *UmamiFeeder) retryConnection(ctx context.Context, config *Config) {
 				return // Exit retry goroutine, plugin remains disabled.
 			}
 
-			h.error("Failed to reconnect to Umami: " + err.Error())
+			h.error("Failed to reconnect to Rybbit: " + err.Error())
 		case <-ctx.Done():
 			h.debug("Context cancelled during retryConnection, stopping connection retries.")
 			return
@@ -206,42 +192,21 @@ func (h *UmamiFeeder) retryConnection(ctx context.Context, config *Config) {
 }
 
 func (h *UmamiFeeder) connect(ctx context.Context, config *Config) error {
-	if h.umamiHost == "" {
-		return fmt.Errorf("`umamiHost` is not set")
+	if h.host == "" {
+		return fmt.Errorf("`host` is not set")
 	}
 
-	if config.UmamiUsername != "" && config.UmamiPassword != "" {
-		token, err := getToken(ctx, h.umamiHost, config.UmamiUsername, config.UmamiPassword)
-		if err != nil {
-			return fmt.Errorf("failed to get token: %w", err)
-		}
-		if token == "" {
-			return fmt.Errorf("retrieved token is empty")
-		}
-		h.debug("token received %s", token)
-		h.umamiToken = token
-	}
-	if h.umamiToken == "" && len(h.websites) == 0 {
-		return fmt.Errorf("either `umamiToken` or `websites` should be set")
-	}
-	if h.umamiToken == "" && h.createNewWebsites {
-		return fmt.Errorf("`umamiToken` is required to create new websites")
+	if h.apiKey == "" {
+		return fmt.Errorf("`apiKey` should be set")
 	}
 
-	if h.umamiToken != "" {
-		websites, err := fetchWebsites(ctx, h.umamiHost, h.umamiToken, h.umamiTeamId)
-		if err != nil {
-			return fmt.Errorf("failed to fetch websites: %w", err)
-		}
+	if len(h.websites) == 0 {
+		return fmt.Errorf("`websites` should not be empty")
+	}
 
-		for _, website := range *websites {
-			if _, ok := h.websites[website.Domain]; ok {
-				continue
-			}
-
-			h.websites[website.Domain] = website.ID
-		}
-		h.debug("websites fetched: %v", h.websites)
+	_, err := sendRequest(ctx, h.host+"/health", nil, nil)
+	if err != nil {
+		return fmt.Errorf("Failed to get health for rybbit: %w", err)
 	}
 
 	return nil

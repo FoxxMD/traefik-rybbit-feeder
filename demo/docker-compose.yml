@@ -1,8 +1,6 @@
 services:
   traefik:
     image: traefik:3
-    depends_on:
-      - umami
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.traefik.service=api@internal"
@@ -24,7 +22,7 @@ services:
       - ./traefik.yml:/traefik.yml:ro
       - ./config.yml:/config/config.yml:ro
       # mount plugin
-      - ../:/plugins-local/src/github.com/astappiev/traefik-umami-feeder
+      - ../:/plugins-local/src/github.com/foxxmd/traefik-rybbit-feeder
 
     restart: unless-stopped
 
@@ -32,7 +30,7 @@ services:
     image: containous/whoami
     ports:
       - target: 80
-        published: 80
+        published: 7654
         protocol: tcp
     labels:
       - "traefik.enable=true"
@@ -41,44 +39,10 @@ services:
       - "traefik.http.routers.whoami.rule=Host(`localhost`)"
       - "traefik.http.routers.whoami.entrypoints=whoami"
       # middleware
-      - "traefik.http.routers.whoami.middlewares=umami@file"
+      - "traefik.http.routers.whoami.middlewares=rybbit@file"
 
     networks:
       - traefik
-
-  umami:
-    image: ghcr.io/umami-software/umami:postgresql-latest
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      - DEBUG=umami:middleware
-      - ENABLE_TEST_CONSOLE=1
-      - DATABASE_URL=postgres://umami:umami@postgres:5432/umami
-    ports:
-      - target: 3000
-        published: 3000
-        protocol: tcp
-    networks:
-      - traefik
-      - umami_postgres
-
-  postgres:
-    image: postgres:16
-    environment:
-      - POSTGRES_PASSWORD=umami
-      - POSTGRES_DB=umami
-      - POSTGRES_USER=umami
-    networks:
-      - umami_postgres
-    volumes:
-      - ./postgres:/var/lib/postgresql/data
-    healthcheck:
-      test: [ "CMD-SHELL", "sh -c 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}'" ]
-      interval: 10s
-      timeout: 3s
-      retries: 3
-
 networks:
   traefik:
-  umami_postgres:
+    name: traefik
