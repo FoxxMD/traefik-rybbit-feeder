@@ -7,7 +7,7 @@ summary: A Traefik plugin that feeds Rybbit Analytics with pageview events
 iconPath: .assets/icon.png
 
 testData:
-  Host: ""
-  ApiKey: ""
+  Host: "localhost:3000"
+  ApiKey: "1234"
   websites:
     localhost: siteId
