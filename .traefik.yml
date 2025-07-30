@@ -1,6 +1,6 @@
-displayName: Traefik Rybbit Feeder
+displayName: Traefik Rybbit
 
-import: github.com/foxxmd/traefik-rybbit-feeder
+import: github.com/foxxmd/traefik-rybbit
 type: middleware
 
 summary: A Traefik plugin that feeds Rybbit Analytics with pageview events
@@ -9,5 +9,5 @@ iconPath: .assets/icon.png
 testData:
   Host: "localhost:3000"
   ApiKey: "1234"
-  websites:
+  Websites:
     localhost: siteId
