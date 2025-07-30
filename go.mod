@@ -1,3 +1,3 @@
-module github.com/FoxxMD/traefik-rybbit-feeder
+module github.com/foxxmd/traefik-rybbit-feeder
 
 go 1.21
