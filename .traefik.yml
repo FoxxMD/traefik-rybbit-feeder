@@ -1,6 +1,6 @@
 displayName: Traefik Rybbit Feeder
 
-import: github.com/foxxmd/traefik-rybbit-feeder
+import: github.com/FoxxMD/traefik-rybbit-feeder
 type: middleware
 
 summary: A Traefik plugin that feeds Rybbit Analytics with pageview events
