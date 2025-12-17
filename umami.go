@@ -204,7 +204,7 @@ func (h *UmamiFeeder) connect(ctx context.Context, config *Config) error {
 		return fmt.Errorf("`websites` should not be empty")
 	}
 
-	_, err := sendRequest(ctx, h.host+"/health", nil, nil)
+	_, err := sendRequest(ctx, h.host+"/api/script.js", nil, nil)
 	if err != nil {
 		return fmt.Errorf("Failed to get health for rybbit: %w", err)
 	}
