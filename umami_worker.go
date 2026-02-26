@@ -9,7 +9,6 @@ import (
 )
 
 type RybbitEvent struct {
-	APIKey     string `json:"api_key"`
 	SiteID     string `json:"site_id"`
 	Type       string `json:"type"`
 	Pathname   string `json:"pathname"`
@@ -25,6 +24,7 @@ type RybbitEvent struct {
 type SendBody struct {
 	Payload *RybbitEvent `json:"payload"`
 	Type    string       `json:"type"`
+	ApiKey  string
 }
 
 func (h *UmamiFeeder) submitToFeed(req *http.Request, code int) {
@@ -37,7 +37,6 @@ func (h *UmamiFeeder) submitToFeed(req *http.Request, code int) {
 	}
 
 	rEvent := &RybbitEvent{
-		APIKey:    h.apiKey,
 		SiteID:    websiteId,
 		Type:      "pageview",
 		Pathname:  req.URL.Path,
@@ -89,7 +88,7 @@ func (h *UmamiFeeder) umamiEventFeeder(ctx context.Context) (err error) {
 			return nil
 
 		case event := <-h.queue:
-			batch = append(batch, &SendBody{Payload: event, Type: "event"})
+			batch = append(batch, &SendBody{Payload: event, Type: "event", ApiKey: h.apiKey})
 			if len(batch) >= h.batchSize {
 				h.reportEventsToUmami(ctx, batch)
 				batch = make([]*SendBody, 0, h.batchSize)
@@ -109,7 +108,10 @@ func (h *UmamiFeeder) umamiEventFeeder(ctx context.Context) (err error) {
 func (h *UmamiFeeder) reportEventsToUmami(ctx context.Context, events []*SendBody) {
 	h.debug("reporting %d events", len(events))
 	for _, value := range events {
-		resp, err := sendRequest(ctx, h.host+"/api/track", value.Payload, nil)
+		headers := map[string][]string{
+			"Authorization": {"Bearer " + value.ApiKey},
+		}
+		resp, err := sendRequest(ctx, h.host+"/api/track", value.Payload, headers)
 		if err != nil {
 			h.error("failed to send tracking: " + err.Error())
 			return
