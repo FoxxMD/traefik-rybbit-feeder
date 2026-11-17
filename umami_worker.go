@@ -2,9 +2,11 @@ package traefik_rybbit_feeder
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -107,21 +109,49 @@ func (h *UmamiFeeder) umamiEventFeeder(ctx context.Context) (err error) {
 
 func (h *UmamiFeeder) reportEventsToUmami(ctx context.Context, events []*SendBody) {
 	h.debug("reporting %d events", len(events))
+	trackURL := h.host + "/api/track"
 	for _, value := range events {
-		headers := map[string][]string{
-			"Authorization": {"Bearer " + value.ApiKey},
-		}
-		resp, err := sendRequest(ctx, h.host+"/api/track", value.Payload, headers)
-		if err != nil {
+		// A failed event is logged and skipped so it doesn't drop the rest of the batch.
+		if err := h.sendEvent(ctx, trackURL, value); err != nil {
 			h.error("failed to send tracking: " + err.Error())
-			return
 		}
-		if h.isDebug {
-			bodyBytes, _ := io.ReadAll(resp.Body)
-			h.debug("%v: %s", resp.Status, string(bodyBytes))
-		}
-		defer func() {
-			_ = resp.Body.Close()
-		}()
 	}
+}
+
+func (h *UmamiFeeder) sendEvent(ctx context.Context, trackURL string, value *SendBody) error {
+	if h.isDebug {
+		summary, err := json.Marshal(struct {
+			URL     string       `json:"url"`
+			Payload *RybbitEvent `json:"payload"`
+			ApiKey  string       `json:"apiKey"`
+		}{trackURL, value.Payload, redactKey(value.ApiKey)})
+		if err != nil {
+			h.debug("could not encode event summary: %v", err)
+		} else {
+			h.debug("sending event %s", summary)
+		}
+	}
+	headers := map[string][]string{
+		"Authorization": {"Bearer " + value.ApiKey},
+	}
+	resp, err := sendRequest(ctx, trackURL, value.Payload, headers)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+	if h.isDebug {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		h.debug("%v: %s", resp.Status, string(bodyBytes))
+	}
+	return nil
+}
+
+// redactKey keeps just enough of an API key to tell keys apart in logs.
+func redactKey(key string) string {
+	if len(key) < 12 {
+		return strings.Repeat("*", len(key))
+	}
+	return key[:4] + strings.Repeat("*", len(key)-8) + key[len(key)-4:]
 }

@@ -15,6 +15,10 @@ import (
 	"time"
 )
 
+// Version is logged on startup. Traefik loads plugins from source and never tells
+// them which version it downloaded, so this must be bumped by hand before each tag.
+const Version = "v0.13.6"
+
 // Config the plugin configuration.
 type Config struct {
 	// Disabled disables the plugin.
@@ -135,6 +139,8 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		ignorePrefixes:   []netip.Prefix{},
 		headerIp:         config.HeaderIp,
 	}
+
+	h.info("traefik-rybbit-feeder %s starting", Version)
 
 	if !h.isDisabled {
 		h.isDisabled = true
@@ -357,16 +363,26 @@ func (h *UmamiFeeder) shouldTrackStatus(statusCode int) (report bool) {
 }
 
 func (h *UmamiFeeder) error(message string) {
-	if h.logHandler != nil {
-		now := time.Now().Format("2006-01-02T15:04:05Z")
-		h.logHandler.Printf("%s ERR middlewareName=%s error=\"%s\"", now, h.name, message)
-	}
+	h.logf("ERR", "%s", message)
+}
+
+// Arguments are handled in the manner of [fmt.Printf].
+func (h *UmamiFeeder) info(format string, v ...any) {
+	h.logf("INF", format, v...)
 }
 
 // Arguments are handled in the manner of [fmt.Printf].
 func (h *UmamiFeeder) debug(format string, v ...any) {
-	if h.logHandler != nil && h.isDebug {
-		now := time.Now().Format("2006-01-02T15:04:05Z")
-		h.logHandler.Printf("%s DBG middlewareName=%s msg=\"%s\"", now, h.name, fmt.Sprintf(format, v...))
+	if h.isDebug {
+		h.logf("DBG", format, v...)
+	}
+}
+
+// logf imitates Traefik's own log lines, since plugins don't inherit its logger.
+// msg is quoted with %q so quotes inside it (e.g. JSON) can't break log parsers.
+func (h *UmamiFeeder) logf(level, format string, v ...any) {
+	if h.logHandler != nil {
+		now := time.Now().UTC().Format(time.RFC3339)
+		h.logHandler.Printf("%s %s middlewareName=%s msg=%q", now, level, h.name, fmt.Sprintf(format, v...))
 	}
 }

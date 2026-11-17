@@ -1,9 +1,14 @@
 package traefik_rybbit_feeder
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -34,7 +39,7 @@ func TestTraefikUmamiFeeder(t *testing.T) {
 }
 
 func TestShouldTrackDefault(t *testing.T) {
-	feeder := UmamiFeeder{}
+	feeder := &UmamiFeeder{}
 
 	assertResource(t, feeder, true, "http://localhost")
 	assertResource(t, feeder, true, "http://localhost/about")
@@ -46,14 +51,14 @@ func TestShouldTrackDefault(t *testing.T) {
 	assertResource(t, feeder, false, "http://localhost/background.png")
 }
 
-func assertResource(t *testing.T, plugin UmamiFeeder, expected bool, url string) {
+func assertResource(t *testing.T, plugin *UmamiFeeder, expected bool, url string) {
 	if expected != plugin.shouldTrackResource(url) {
 		t.Fatalf("expected %v for %s", expected, url)
 	}
 }
 
 func TestShouldTrackInvalidIp(t *testing.T) {
-	feeder := UmamiFeeder{}
+	feeder := &UmamiFeeder{}
 	err := feeder.verifyConfig(&Config{
 		IgnoreIPs: []string{"127.0.0.1-127.0.0.10"},
 	})
@@ -64,7 +69,7 @@ func TestShouldTrackInvalidIp(t *testing.T) {
 }
 
 func TestShouldTrackIps(t *testing.T) {
-	feeder := UmamiFeeder{createNewWebsites: true}
+	feeder := &UmamiFeeder{createNewWebsites: true}
 	err := feeder.verifyConfig(&Config{
 		IgnoreIPs: []string{"127.0.0.1", "10.0.0.1/24"},
 	})
@@ -83,7 +88,7 @@ func TestShouldTrackIps(t *testing.T) {
 	assertIgnoreIp(t, feeder, true, "8.8.8.8")
 }
 
-func assertIgnoreIp(t *testing.T, plugin UmamiFeeder, expected bool, clientIp string) {
+func assertIgnoreIp(t *testing.T, plugin *UmamiFeeder, expected bool, clientIp string) {
 	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://localhost", nil)
 	req.Header.Set(plugin.headerIp, clientIp)
 
@@ -93,7 +98,7 @@ func assertIgnoreIp(t *testing.T, plugin UmamiFeeder, expected bool, clientIp st
 }
 
 func TestShouldTrackUrls(t *testing.T) {
-	feeder := UmamiFeeder{createNewWebsites: true}
+	feeder := &UmamiFeeder{createNewWebsites: true}
 	err := feeder.verifyConfig(&Config{
 		IgnoreURLs: []string{"https?://[^/]+/health$", "/about"},
 	})
@@ -112,7 +117,7 @@ func TestShouldTrackUrls(t *testing.T) {
 	assertIgnoreUrl(t, feeder, true, "http://localhost/hello-world")
 }
 
-func assertIgnoreUrl(t *testing.T, plugin UmamiFeeder, expected bool, url string) {
+func assertIgnoreUrl(t *testing.T, plugin *UmamiFeeder, expected bool, url string) {
 	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
 
 	if expected != plugin.shouldTrack(req) {
@@ -121,7 +126,7 @@ func assertIgnoreUrl(t *testing.T, plugin UmamiFeeder, expected bool, url string
 }
 
 func TestShouldTrackUserAgents(t *testing.T) {
-	feeder := UmamiFeeder{createNewWebsites: true, ignoreUserAgents: []string{"Googlebot", "Uptime-Kuma"}}
+	feeder := &UmamiFeeder{createNewWebsites: true, ignoreUserAgents: []string{"Googlebot", "Uptime-Kuma"}}
 
 	assertIgnoreUa(t, feeder, true, "Mozilla/5.0 (Windows; Windows NT 6.0; WOW64) Gecko/20100101 Firefox/60.7")
 	assertIgnoreUa(t, feeder, true, "Mozilla/5.0 (compatible; MSIE 10.0; Windows NT 10.0; Win64; x64 Trident/6.0)")
@@ -133,11 +138,60 @@ func TestShouldTrackUserAgents(t *testing.T) {
 	assertIgnoreUa(t, feeder, false, "Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/W.X.Y.Z Mobile Safari/537.36 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)")
 }
 
-func assertIgnoreUa(t *testing.T, plugin UmamiFeeder, expected bool, ua string) {
+func assertIgnoreUa(t *testing.T, plugin *UmamiFeeder, expected bool, ua string) {
 	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://localhost/", nil)
 	req.Header.Set("User-Agent", ua)
 
 	if expected != plugin.shouldTrack(req) {
 		t.Fatalf("expected %v for %s", expected, ua)
+	}
+}
+
+func TestRedactKey(t *testing.T) {
+	for in, want := range map[string]string{
+		"":                    "",
+		"short":               "*****",
+		"rb_0123456789abcdef": "rb_0***********cdef",
+	} {
+		if got := redactKey(in); got != want {
+			t.Errorf("redactKey(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestReportEventsContinuesAfterFailure(t *testing.T) {
+	var got []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var ev RybbitEvent
+		_ = json.NewDecoder(r.Body).Decode(&ev)
+		got = append(got, ev.Pathname)
+		if ev.Pathname == "/fail" {
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	defer srv.Close()
+
+	var buf bytes.Buffer
+	h := &UmamiFeeder{name: "test", isDebug: true, logHandler: log.New(&buf, "", 0), host: srv.URL}
+	h.reportEventsToUmami(context.Background(), []*SendBody{
+		{ApiKey: "rb_0123456789abcdef", Payload: &RybbitEvent{Pathname: "/fail"}},
+		{ApiKey: "rb_0123456789abcdef", Payload: &RybbitEvent{Pathname: "/ok"}},
+	})
+
+	if strings.Join(got, ",") != "/fail,/ok" {
+		t.Fatalf("server received %v, want both events", got)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		` ERR middlewareName=test msg="failed to send tracking: request failed with status 500`,
+		`msg="sending event {\"url\":`,
+		`\"apiKey\":\"rb_0***********cdef\"}"`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	if !regexp.MustCompile(`^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ `).MatchString(out) {
+		t.Errorf("log line should start with a UTC RFC3339 timestamp:\n%s", out)
 	}
 }
